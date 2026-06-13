@@ -1,1 +1,362 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>バス接近通知 - Bus KURU</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a1628;color:#e2e8f0;font-family:'Hiragino Sans','Noto Sans JP',sans-serif;min-height:100vh}
+input[type=range]{accent-color:#0ea5e9;width:100%}
+@keyframes busRide{0%{transform:translateX(-50px);opacity:0}20%{opacity:1}80%{opacity:1}100%{transform:translateX(50px);opacity:0}}
+@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-14px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes urgent{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.4)}50%{box-shadow:0 0 0 14px rgba(239,68,68,0)}}
+#app{max-width:430px;margin:0 auto}
+.card{background:#1e293b;border-radius:14px;padding:16px;border:1px solid #334155;margin-bottom:14px}
+.btn{border:none;border-radius:12px;cursor:pointer;font-family:inherit;font-weight:600}
+.inp{background:#0a1628;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;font-size:14px;font-family:inherit;outline:none;width:100%;box-sizing:border-box}
+.inp:focus{border-color:#0ea5e9}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const WORKER = "https://cold-recipe-799d.kikucchao.workers.dev";
 
+// ============================================================
+// ユーティリティ
+// ============================================================
+function parseCSV(text) {
+  if (!text) return [];
+  const lines = text.trim().split("\n");
+  if (lines.length < 2) return [];
+  const headers = lines[0].replace(/\r/g,"").split(",").map(h=>h.trim().replace(/^"|"$/g,""));
+  return lines.slice(1).filter(l=>l.trim()).map(line=>{
+    const vals=[];let cur="",inQ=false;
+    for(const c of line.replace(/\r/g,"")){
+      if(c==='"'){inQ=!inQ;continue;}
+      if(c===","&&!inQ){vals.push(cur.trim());cur="";continue;}
+      cur+=c;
+    }
+    vals.push(cur.trim());
+    const obj={};headers.forEach((h,i)=>{obj[h]=vals[i]??"";});
+    return obj;
+  });
+}
+
+function buildRoute(files, targetStopId) {
+  const stops=parseCSV(files["stops.txt"]);
+  const stopTimes=parseCSV(files["stop_times.txt"]);
+  const trips=parseCSV(files["trips.txt"]);
+  const routes=parseCSV(files["routes.txt"]);
+  const tripIds=[...new Set(stopTimes.filter(st=>st.stop_id===targetStopId).map(st=>st.trip_id))];
+  if(!tripIds.length) return null;
+  const tripId=tripIds[0];
+  const tripStops=stopTimes.filter(st=>st.trip_id===tripId).sort((a,b)=>+a.stop_sequence-+b.stop_sequence);
+  const stopList=tripStops.map(ts=>{const s=stops.find(s=>s.stop_id===ts.stop_id);return{id:ts.stop_id,name:s?.stop_name??ts.stop_id};});
+  const schedules=tripIds.slice(0,50).map(tid=>{
+    const f=stopTimes.filter(st=>st.trip_id===tid).sort((a,b)=>+a.stop_sequence-+b.stop_sequence)[0];
+    return f?.departure_time??f?.arrival_time;
+  }).filter(Boolean).sort();
+  const routeId=trips.find(t=>t.trip_id===tripId)?.route_id;
+  const routeName=routes.find(r=>r.route_id===routeId)?.route_long_name??routes.find(r=>r.route_id===routeId)?.route_short_name??"路線";
+  return{routeName,stopList,schedules};
+}
+
+function parseTime(str){if(!str)return 0;const[h,m]=str.split(":").map(Number);return h*60+m;}
+function formatTime(m){const h=Math.floor(m/60)%24;return`${String(h).padStart(2,"0")}:${String(Math.round(m%60)).padStart(2,"0")}`;}
+function calcTimes(dep,count,iv){const b=parseTime(dep);return Array.from({length:count},(_,i)=>b+i*iv);}
+function busPos(times,now){for(let i=0;i<times.length;i++){if(now<times[i]){const p=i===0?0:(now-times[i-1])/(times[i]-times[i-1]);return Math.max(0,i-1+Math.min(1,p));}}return times.length-1;}
+function saveConfig(cfg){try{localStorage.setItem("buskuru",JSON.stringify(cfg));}catch{}}
+function loadConfig(){try{const s=localStorage.getItem("buskuru");return s?JSON.parse(s):null;}catch{return null;}}
+
+// ============================================================
+// 状態管理
+// ============================================================
+let state = {
+  screen: "welcome", // welcome | loading | stop_select | monitor | manual
+  route: null,
+  targetIdx: 0,
+  cachedFiles: null,
+  allStops: [],
+  stopFilter: "",
+  searchQuery: "",
+  searchResults: [],
+  loadMsg: "",
+  loadError: "",
+  notifyMode: "stops",
+  notifyStops: 2,
+  notifyMins: 5,
+  banner: null,
+  notifiedIds: new Set(),
+  nowMin: (()=>{const n=new Date();return n.getHours()*60+n.getMinutes();})(),
+  simMode: false,
+  showSettings: false,
+  manualName: "",
+  manualStops: "",
+  manualTimes: "",
+  manualInterval: "3",
+};
+
+function setState(patch) {
+  Object.assign(state, patch);
+  render();
+}
+
+// ============================================================
+// タイマー
+// ============================================================
+let simTimer = null;
+let clockTimer = setInterval(()=>{
+  if(!state.simMode){
+    const n=new Date();
+    state.nowMin=n.getHours()*60+n.getMinutes();
+    checkNotify();
+  }
+},15000);
+
+function startSim(){
+  simTimer=setInterval(()=>{
+    state.nowMin+=0.5;
+    checkNotify();
+    render();
+  },500);
+}
+function stopSim(){clearInterval(simTimer);}
+
+// ============================================================
+// バス計算
+// ============================================================
+function getBuses(){
+  if(!state.route)return[];
+  const iv=state.route.intervalMinutes??3.5;
+  return state.route.schedules.map((dep,i)=>{
+    const times=calcTimes(dep,state.route.stops.length,iv);
+    return{id:`b${i}`,times,posFloat:busPos(times,state.nowMin),minsToTarget:times[state.targetIdx]-state.nowMin,depMin:parseTime(dep)};
+  }).filter(b=>state.nowMin>=b.depMin&&b.times[state.targetIdx]>=state.nowMin-1);
+}
+
+function checkNotify(){
+  if(state.screen!=="monitor"||!state.route)return;
+  getBuses().forEach(bus=>{
+    if(state.notifiedIds.has(bus.id))return;
+    let fire=false,msg="";
+    if(state.notifyMode==="stops"){
+      const at=state.targetIdx-state.notifyStops;
+      if(at>=0&&bus.posFloat>=at&&bus.posFloat<at+1.2){fire=true;msg=`バスが${state.notifyStops}つ前「${state.route.stops[at]?.name}」に来ました！準備して🏃`;}
+    }else{
+      if(bus.minsToTarget<=state.notifyMins&&bus.minsToTarget>0){fire=true;msg=`バスがあと約${Math.ceil(bus.minsToTarget)}分で来ます！準備して🏃`;}
+    }
+    if(fire){
+      state.notifiedIds=new Set([...state.notifiedIds,bus.id]);
+      state.banner=msg;
+      if("Notification"in window&&Notification.permission==="granted")new Notification("🚌 バスが来ます！",{body:msg});
+      render();
+    }
+  });
+}
+
+// ============================================================
+// API
+// ============================================================
+async function handleSearch(){
+  if(!state.searchQuery.trim())return;
+  setState({loadError:"",searchResults:[],loadMsg:"検索しています…"});
+  try{
+    const res=await fetch(`${WORKER}/?action=search&q=${encodeURIComponent(state.searchQuery)}`);
+    const data=await res.json();
+    if(data.error)throw new Error(data.error);
+    setState({searchResults:data.results??[],loadMsg:data.results?.length?"":"見つかりませんでした"});
+  }catch(e){setState({loadError:e.message,loadMsg:""});}
+}
+
+async function handleSelectCompany(company){
+  setState({loadError:"",searchResults:[],screen:"loading",loadMsg:"最新の時刻表を探しています…"});
+  try{
+    let gtfsUrl=null;
+    if(company.source==="known"){
+      const res=await fetch(`${WORKER}/?action=find_zip&id=${company.id}`);
+      const data=await res.json();
+      if(data.error)throw new Error(data.error);
+      gtfsUrl=data.latestUrl;
+    }else if(company.gtfsUrl){gtfsUrl=company.gtfsUrl;}
+    if(!gtfsUrl)throw new Error("URLが見つかりませんでした");
+    setState({loadMsg:"時刻表データを読み込んでいます…（少し時間がかかります）"});
+    const res2=await fetch(`${WORKER}/?action=fetch_gtfs&url=${encodeURIComponent(gtfsUrl)}`);
+    const data2=await res2.json();
+    if(data2.error)throw new Error(data2.error);
+    setState({cachedFiles:data2.files,allStops:parseCSV(data2.files["stops.txt"]),stopFilter:"",loadMsg:"",screen:"stop_select"});
+  }catch(e){setState({loadError:e.message,loadMsg:"",screen:"welcome"});}
+}
+
+function handleSelectStop(stopId){
+  const result=buildRoute(state.cachedFiles,stopId);
+  if(!result){setState({loadError:"この停留所を含む便が見つかりませんでした"});return;}
+  const newStops=result.stopList.map(s=>({id:s.id,name:s.name}));
+  const newTargetIdx=Math.max(0,result.stopList.findIndex(s=>s.id===stopId));
+  const newRoute={name:result.routeName,stops:newStops,schedules:result.schedules,intervalMinutes:3};
+  saveConfig({route:newRoute,targetIdx:newTargetIdx,notifyMode:state.notifyMode,notifyStops:state.notifyStops,notifyMins:state.notifyMins});
+  setState({route:newRoute,targetIdx:newTargetIdx,notifiedIds:new Set(),screen:"monitor"});
+}
+
+function applyManual(){
+  const stops=state.manualStops.split("\n").map(s=>s.trim()).filter(Boolean).map((name,i)=>({id:`m${i}`,name}));
+  const schedules=state.manualTimes.split("\n").map(s=>s.trim()).filter(s=>/^\d{1,2}:\d{2}$/.test(s));
+  if(stops.length<2){alert("停留所を2つ以上入力してください");return;}
+  if(!schedules.length){alert("時刻表を入力してください（例: 08:00）");return;}
+  const newRoute={name:state.manualName||"手動入力路線",stops,schedules,intervalMinutes:parseFloat(state.manualInterval)||3};
+  const newTarget=stops.length-1;
+  saveConfig({route:newRoute,targetIdx:newTarget,notifyMode:state.notifyMode,notifyStops:state.notifyStops,notifyMins:state.notifyMins});
+  setState({route:newRoute,targetIdx:newTarget,notifiedIds:new Set(),screen:"monitor"});
+}
+
+// ============================================================
+// HTML生成
+// ============================================================
+function h(tag,attrs,children){
+  const el=document.createElement(tag);
+  if(attrs)Object.entries(attrs).forEach(([k,v])=>{
+    if(k==="style"&&typeof v==="object")Object.assign(el.style,v);
+    else if(k.startsWith("on"))el[k.toLowerCase()]=v;
+    else if(k==="className")el.className=v;
+    else el.setAttribute(k,v);
+  });
+  if(children)([].concat(children)).forEach(c=>{
+    if(c==null)return;
+    el.appendChild(typeof c==="string"?document.createTextNode(c):c);
+  });
+  return el;
+}
+
+function pill(color,text){
+  return h("span",{style:{background:color+"22",color,border:`1px solid ${color}44`,borderRadius:"6px",padding:"1px 7px",fontSize:"11px",fontWeight:"600",marginLeft:"6px"}},text);
+}
+
+function makeTimeline(stops,posFloat,targetIdx,notifyIdx){
+  const wrap=h("div",{style:{position:"relative",paddingLeft:"12px"}});
+  const line=h("div",{style:{position:"absolute",left:"20px",top:"8px",bottom:"8px",width:"2px",background:"#1e293b",borderRadius:"2px"}});
+  wrap.appendChild(line);
+  if(posFloat>=0){
+    const pct=(Math.min(posFloat,stops.length-1)/(stops.length-1)*100)+"%";
+    const prog=h("div",{style:{position:"absolute",left:"20px",top:"8px",height:pct,width:"2px",background:"linear-gradient(to bottom,#22c55e,#38bdf8)",borderRadius:"2px",transition:"height 0.8s ease"}});
+    wrap.appendChild(prog);
+  }
+  stops.forEach((stop,i)=>{
+    const passed=i<posFloat-0.3,isTarget=i===targetIdx,isNotify=i===notifyIdx,isBus=Math.abs(i-posFloat)<0.7;
+    const col=isBus?"#facc15":isTarget?"#38bdf8":isNotify?"#a78bfa":passed?"#22c55e":"#1e3a5f";
+    const row=h("div",{style:{display:"flex",alignItems:"center",marginBottom:i<stops.length-1?"11px":"0",opacity:passed&&!isTarget&&!isNotify?"0.3":"1"}});
+    const dot=h("div",{style:{width:"16px",height:"16px",borderRadius:"50%",background:col,border:"3px solid #0a1628",flexShrink:"0",zIndex:"1",boxShadow:isBus||isTarget?`0 0 12px ${col}`:"none"}});
+    const nameEl=h("div",{style:{marginLeft:"14px",fontSize:isTarget?"15px":"13px",fontWeight:isTarget||isBus?"700":"400",color:isBus?"#facc15":isTarget?"#38bdf8":isNotify?"#a78bfa":passed?"#334155":"#94a3b8",display:"flex",alignItems:"center",flexWrap:"wrap"}},stop.name);
+    if(isTarget)nameEl.appendChild(pill("#38bdf8","乗車"));
+    if(isNotify&&!isTarget)nameEl.appendChild(pill("#a78bfa","通知"));
+    if(isBus)nameEl.appendChild(document.createTextNode(" 🚌"));
+    row.appendChild(dot);row.appendChild(nameEl);wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+// ============================================================
+// レンダリング
+// ============================================================
+function render(){
+  const app=document.getElementById("app");
+  app.innerHTML="";
+  const buses=getBuses();
+  const nextBus=buses.find(b=>b.minsToTarget>0);
+  const mins=nextBus?Math.ceil(nextBus.minsToTarget):null;
+  const isUrgent=mins!==null&&mins<=3;
+  const notifyAtIdx=state.notifyMode==="stops"?Math.max(0,state.targetIdx-state.notifyStops):null;
+  const filtered=state.stopFilter?state.allStops.filter(s=>s.stop_name?.includes(state.stopFilter)||s.stop_id?.includes(state.stopFilter)):state.allStops;
+
+  // バナー
+  if(state.banner){
+    const ban=h("div",{style:{position:"fixed",top:"12px",left:"50%",transform:"translateX(-50%)",zIndex:"200",background:"linear-gradient(135deg,#0ea5e9,#6366f1)",color:"white",padding:"13px 18px",borderRadius:"16px",boxShadow:"0 8px 32px rgba(14,165,233,0.5)",maxWidth:"90vw",display:"flex",alignItems:"center",gap:"12px",animation:"slideDown 0.3s ease"}},[
+      h("span",null,"🔔"),
+      h("span",{style:{fontSize:"14px",fontWeight:"600",flex:"1"}},state.banner),
+      h("button",{style:{background:"rgba(255,255,255,0.2)",border:"none",color:"white",borderRadius:"8px",padding:"4px 10px",cursor:"pointer",fontSize:"13px"},onclick:()=>setState({banner:null})},"閉じる"),
+    ]);
+    app.appendChild(ban);
+  }
+
+  // ローディング
+  if(state.screen==="loading"){
+    app.appendChild(h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px"}},[
+      h("div",{style:{fontSize:"48px",animation:"busRide 2s ease-in-out infinite",marginBottom:"24px"}},"🚌"),
+      h("div",{style:{fontSize:"16px",fontWeight:"700",marginBottom:"8px",textAlign:"center"}},state.loadMsg),
+      h("button",{className:"btn",style:{marginTop:"16px",background:"#1e293b",padding:"10px 20px",color:"#64748b",fontSize:"13px"},onclick:()=>setState({screen:"welcome",loadMsg:"",loadError:""})},"キャンセル"),
+    ]));
+    return;
+  }
+
+  // ウェルカム
+  if(state.screen==="welcome"){
+    const inner=h("div",{style:{width:"100%",maxWidth:"380px"}});
+    inner.appendChild(h("div",{style:{textAlign:"center",marginBottom:"32px"}},[
+      h("div",{style:{fontSize:"52px",marginBottom:"12px",animation:"float 2.5s ease-in-out infinite"}},"🚌"),
+      h("div",{style:{fontSize:"22px",fontWeight:"800",marginBottom:"8px"}},"バス接近通知"),
+      h("div",{style:{fontSize:"13px",color:"#475569",lineHeight:"1.8"}},"バス会社名を入力するだけで\n最新の時刻表を自動で取得します"),
+    ]));
+    const row=h("div",{style:{display:"flex",gap:"8px",marginBottom:"14px"}});
+    const inp=h("input",{type:"text",placeholder:"バス会社名（例：十勝バス）",style:{flex:"1",background:"#1e293b",border:"1px solid #334155",borderRadius:"12px",padding:"13px 16px",color:"#e2e8f0",fontSize:"15px",fontFamily:"inherit",outline:"none"}});
+    inp.value=state.searchQuery;
+    inp.oninput=e=>state.searchQuery=e.target.value;
+    inp.onkeydown=e=>e.key==="Enter"&&handleSearch();
+    const btn=h("button",{className:"btn",style:{padding:"13px 18px",background:"#0ea5e9",borderRadius:"12px",color:"white",fontSize:"15px",flexShrink:"0"},onclick:handleSearch},"検索");
+    row.appendChild(inp);row.appendChild(btn);inner.appendChild(row);
+    if(state.loadError)inner.appendChild(h("div",{style:{background:"#450a0a",border:"1px solid #7f1d1d",borderRadius:"10px",padding:"10px 14px",marginBottom:"14px",fontSize:"13px",color:"#f87171"}},state.loadError));
+    if(state.loadMsg)inner.appendChild(h("div",{style:{textAlign:"center",color:"#475569",fontSize:"13px",marginBottom:"8px"}},state.loadMsg));
+    if(state.searchResults.length){
+      const list=h("div",{style:{background:"#1e293b",borderRadius:"14px",border:"1px solid #334155",overflow:"hidden",marginBottom:"14px"}});
+      list.appendChild(h("div",{style:{fontSize:"11px",color:"#475569",padding:"10px 16px 6px"}},`検索結果 ${state.searchResults.length}件`));
+      state.searchResults.forEach(co=>{
+        const item=h("div",{style:{padding:"14px 16px",borderTop:"1px solid #1e3a5f",cursor:"pointer",display:"flex",alignItems:"center",gap:"12px"},onclick:()=>handleSelectCompany(co)},[
+          h("div",{style:{width:"36px",height:"36px",borderRadius:"10px",background:"#0ea5e922",border:"1px solid #0ea5e944",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",flexShrink:"0"}},"🚌"),
+          h("div",{style:{flex:"1"}},[
+            h("div",{style:{fontSize:"15px",fontWeight:"600"}},co.name),
+            h("div",{style:{fontSize:"11px",color:"#475569",marginTop:"2px"}},co.source==="known"?"自社HP公開":"国交省データ"),
+          ]),
+          h("div",{style:{color:"#334155",fontSize:"20px"}},"›"),
+        ]);
+        list.appendChild(item);
+      });
+      inner.appendChild(list);
+    }
+    inner.appendChild(h("div",{style:{textAlign:"center"}},
+      h("button",{style:{background:"none",border:"none",color:"#334155",fontSize:"13px",cursor:"pointer",textDecoration:"underline"},onclick:()=>setState({screen:"manual"})},"時刻表を手動で入力する")
+    ));
+    app.appendChild(h("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px"}},inner));
+    return;
+  }
+
+  // 停留所選択
+  if(state.screen==="stop_select"){
+    const wrap=h("div",null);
+    wrap.appendChild(h("div",{style:{background:"linear-gradient(135deg,#0ea5e9,#6366f1)",padding:"28px 20px 20px"}},[
+      h("button",{style:{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:"8px",color:"white",padding:"6px 12px",fontSize:"13px",cursor:"pointer",marginBottom:"14px",display:"block"},onclick:()=>setState({screen:"welcome"})},"← 戻る"),
+      h("div",{style:{fontSize:"20px",fontWeight:"800",marginBottom:"6px"}},"乗る停留所を選んでください"),
+      h("div",{style:{fontSize:"13px",color:"rgba(255,255,255,0.7)"}},"一度設定すれば次回から自動で起動します"),
+    ]));
+    const body=h("div",{style:{padding:"14px"}});
+    const sinp=h("input",{type:"text",placeholder:"🔍 停留所名で絞り込み…",style:{width:"100%",background:"#0a1628",border:"1px solid #334155",borderRadius:"8px",padding:"10px 14px",color:"#e2e8f0",fontSize:"15px",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}});
+    sinp.value=state.stopFilter;
+    sinp.oninput=e=>{state.stopFilter=e.target.value;render();};
+    body.appendChild(h("div",{className:"card"},sinp));
+    if(state.loadError)body.appendChild(h("div",{style:{background:"#450a0a",borderRadius:"10px",padding:"10px 14px",marginBottom:"14px",fontSize:"13px",color:"#f87171"}},state.loadError));
+    const list=h("div",{style:{background:"#1e293b",borderRadius:"14px",border:"1px solid #334155",overflow:"hidden"}});
+    const shown=filtered.slice(0,200);
+    if(!shown.length)list.appendChild(h("div",{style:{padding:"20px",textAlign:"center",color:"#475569",fontSize:"13px"}},"該当する停留所がありません"));
+    shown.forEach((s,i)=>{
+      const item=h("div",{style:{padding:"13px 16px",borderBottom:i<shown.length-1?"1px solid #1e3a5f":"none",cursor:"pointer",display:"flex",alignItems:"center",gap:"12px"},onclick:()=>handleSelectStop(s.stop_id)},[
+        h("div",{style:{width:"30px",height:"30px",borderRadius:"50%",background:"#0ea5e922",border:"1px solid #0ea5e933",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:"0"}},"🚏"),
+        h("div",{style:{flex:"1"}},[
+          h("div",{style:{fontSize:"15px",color:"#e2e8f0"}},s.stop_name),
+          h("div",{style:{fontSize:"11px",color:"#334155",marginTop:"2px"}},s.stop_id),
+        ]),
+        h("div",{style:{color:"#334155",fontSize:"20px"}},"›"),
+      ]);
+      list.appendChild(item);
+    });
+    body.appendChild(list);
+    body.appendChild(h("div",{style:{fontSize:"11px",color:"#1e3a5f",textAlign:"center",marginTop:"10px"}},filtered.length>200?`上位200件表示（全${filtered.length}件）`:`${filtered.length}件`));
+    wrap.appendChild(body);ap
