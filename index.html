@@ -12,42 +12,38 @@ input[type=range]{accent-color:#0ea5e9;width:100%}
 .card{background:#1e293b;border-radius:14px;padding:16px;border:1px solid #334155;margin-bottom:14px}
 .btn{border:none;border-radius:12px;cursor:pointer;font-family:inherit;font-weight:600;font-size:14px}
 .inp{background:#0a1628;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:10px 12px;font-size:14px;font-family:inherit;outline:none;width:100%}
-.lbl{font-size:12px;color:#64748b;margin-bottom:4px;margin-top:10px;display:block}
+.inp:focus{border-color:#0ea5e9}
 @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes urgent{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.4)}50%{box-shadow:0 0 0 14px rgba(239,68,68,0)}}
-@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-14px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 </style>
 </head>
 <body>
-<div id="app"><div style="text-align:center;padding:40px;color:#475569">読み込み中…</div></div>
-
+<div id="app"><div style="text-align:center;padding:40px;color:#475569">起動中…</div></div>
 <script>
 'use strict';
-var WORKER = "https://cold-recipe-799d.kikucchao.workers.dev";
+var WORKER="https://cold-recipe-799d.kikucchao.workers.dev";
 
-// ===== CSV パーサー =====
-function parseCSV(text) {
-  if (!text) return [];
-  var lines = text.trim().split("\n");
-  if (lines.length < 2) return [];
-  var headers = lines[0].replace(/\r/g,"").split(",").map(function(h){return h.trim().replace(/^"|"$/g,"");});
+// CSV パーサー
+function parseCSV(text){
+  if(!text)return[];
+  var lines=text.trim().split("\n");
+  if(lines.length<2)return[];
+  var headers=lines[0].replace(/\r/g,"").split(",").map(function(h){return h.trim().replace(/^"|"$/g,"");});
   return lines.slice(1).filter(function(l){return l.trim();}).map(function(line){
-    var vals=[],cur="",inQ=false;
-    var chars=line.replace(/\r/g,"").split("");
+    var vals=[],cur="",inQ=false,chars=line.replace(/\r/g,"").split("");
     for(var i=0;i<chars.length;i++){
       var c=chars[i];
-      if(c==='"'){inQ=!inQ;}
-      else if(c===","&&!inQ){vals.push(cur.trim());cur="";}
-      else{cur+=c;}
+      if(c==='"'){inQ=!inQ;}else if(c===","&&!inQ){vals.push(cur.trim());cur="";}else{cur+=c;}
     }
     vals.push(cur.trim());
-    var obj={};
-    headers.forEach(function(h,i){obj[h]=vals[i]||"";});
+    var obj={};headers.forEach(function(h,i){obj[h]=vals[i]||"";});
     return obj;
   });
 }
 
-function buildRoute(files, targetStopId) {
+function buildRoute(files,targetStopId){
   var stops=parseCSV(files["stops.txt"]);
   var stopTimes=parseCSV(files["stop_times.txt"]);
   var trips=parseCSV(files["trips.txt"]);
@@ -56,60 +52,122 @@ function buildRoute(files, targetStopId) {
   stopTimes.forEach(function(st){if(st.stop_id===targetStopId&&tripIds.indexOf(st.trip_id)<0)tripIds.push(st.trip_id);});
   if(!tripIds.length)return null;
   var tripId=tripIds[0];
-  var tripStops=stopTimes.filter(function(st){return st.trip_id===tripId;}).sort(function(a,b){return +a.stop_sequence-+b.stop_sequence;});
+  var tripStops=stopTimes.filter(function(st){return st.trip_id===tripId;}).sort(function(a,b){return+a.stop_sequence-+b.stop_sequence;});
   var stopList=tripStops.map(function(ts){var s=stops.filter(function(s){return s.stop_id===ts.stop_id;})[0];return{id:ts.stop_id,name:s?s.stop_name:ts.stop_id};});
   var schedules=tripIds.slice(0,50).map(function(tid){
-    var arr=stopTimes.filter(function(st){return st.trip_id===tid;}).sort(function(a,b){return +a.stop_sequence-+b.stop_sequence;});
+    var arr=stopTimes.filter(function(st){return st.trip_id===tid;}).sort(function(a,b){return+a.stop_sequence-+b.stop_sequence;});
     return arr[0]?(arr[0].departure_time||arr[0].arrival_time):null;
   }).filter(Boolean).sort();
   var routeId=(trips.filter(function(t){return t.trip_id===tripId;})[0]||{}).route_id;
   var routeRow=routes.filter(function(r){return r.route_id===routeId;})[0]||{};
   var routeName=routeRow.route_long_name||routeRow.route_short_name||"路線";
-  return{routeName:routeName,stopList:stopList,schedules:schedules};
+  // trip_idのリストも返す
+  var tripIdMap={};
+  tripIds.forEach(function(tid){
+    var arr=stopTimes.filter(function(st){return st.trip_id===tid;}).sort(function(a,b){return+a.stop_sequence-+b.stop_sequence;});
+    if(arr[0])tripIdMap[tid]=arr[0].departure_time||arr[0].arrival_time;
+  });
+  return{routeName:routeName,stopList:stopList,schedules:schedules,tripIdMap:tripIdMap};
 }
 
-// ===== 時刻 =====
-// GTFSは "08:30:00" 形式（秒あり）なので対応
-function parseTime(str){if(!str)return 0;var p=str.split(":");return +p[0]*60+(+p[1])+(p[2]?+p[2]/60:0);}
-function formatTime(m){var h=Math.floor(m/60)%24;var min=Math.round(m%60);return(h<10?"0":"")+h+":"+(min<10?"0":"")+min;}
+function parseTime(str){if(!str)return 0;var p=str.split(":");return+p[0]*60+(+p[1])+(p[2]?+p[2]/60:0);}
+function formatTime(m){var h=Math.floor(m/60)%24;return(h<10?"0":"")+h+":"+(Math.round(m%60)<10?"0":"")+Math.round(m%60);}
 function calcTimes(dep,count,iv){var b=parseTime(dep);return Array.from?Array.from({length:count},function(_,i){return b+i*iv;}):(function(){var a=[];for(var i=0;i<count;i++)a.push(b+i*iv);return a;})();}
 function busPos(times,now){for(var i=0;i<times.length;i++){if(now<times[i]){var p=i===0?0:(now-times[i-1])/(times[i]-times[i-1]);return Math.max(0,i-1+Math.min(1,p));}}return times.length-1;}
+function saveConfig(cfg){try{localStorage.setItem("buskuru4",JSON.stringify(cfg));}catch(e){}}
+function loadConfig(){try{var s=localStorage.getItem("buskuru4");return s?JSON.parse(s):null;}catch(e){return null;}}
+function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 
-// ===== 保存 =====
-function saveConfig(cfg){try{localStorage.setItem("buskuru3",JSON.stringify(cfg));}catch(e){}}
-function loadConfig(){try{var s=localStorage.getItem("buskuru3");return s?JSON.parse(s):null;}catch(e){return null;}}
-
-// ===== 状態 =====
+// 状態
 var S={
   screen:"welcome",
-  route:null, targetIdx:0,
-  gtfsUrl:null, allStops:[], stopFilter:"",
-  searchQuery:"", searchResults:[],
-  loadMsg:"", loadError:"",
-  notifyMode:"stops", notifyStops:2, notifyMins:5,
-  banner:null, notifiedIds:[],
+  route:null,targetIdx:0,
+  gtfsUrl:null,realtimeId:null,
+  allStops:[],stopFilter:"",
+  searchQuery:"",searchResults:[],
+  loadMsg:"",loadError:"",
+  notifyMode:"stops",notifyStops:2,notifyMins:5,
+  banner:null,notifiedIds:[],
   nowMin:(function(){var n=new Date();return n.getHours()*60+n.getMinutes()+n.getSeconds()/60;}()),
-  simMode:false, showSettings:false,
-  manualName:"", manualStops:"", manualTimes:"", manualInterval:"3"
+  showSettings:false,
+  // リアルタイムデータ
+  realtimeVehicles:[],
+  realtimeDelays:{},
+  realtimeError:"",
+  lastRealtimeUpdate:0,
+  useRealtime:true,
+  manualName:"",manualStops:"",manualTimes:"",manualInterval:"3"
 };
 
-// ===== タイマー =====
-var simTimer=null;
+// リアルタイム更新（30秒ごと）
+var realtimeTimer=null;
+function startRealtimeUpdates(){
+  if(realtimeTimer)clearInterval(realtimeTimer);
+  fetchRealtime();
+  realtimeTimer=setInterval(fetchRealtime,30000);
+}
+function fetchRealtime(){
+  if(!S.realtimeId||!S.useRealtime)return;
+  fetch(WORKER+"/?action=realtime&id="+S.realtimeId)
+  .then(function(r){return r.json();})
+  .then(function(data){
+    if(data.error){S.realtimeError=data.error;}
+    else{
+      S.realtimeVehicles=data.vehicles||[];
+      S.realtimeDelays=data.delays||{};
+      S.realtimeError="";
+      S.lastRealtimeUpdate=Date.now();
+    }
+    if(S.screen==="monitor")render();
+    checkNotify();
+  }).catch(function(e){S.realtimeError=e.message;});
+}
+
+// 時刻更新
 setInterval(function(){
-  if(!S.simMode){S.nowMin=(function(){var n=new Date();return n.getHours()*60+n.getMinutes()+n.getSeconds()/60;}());checkNotify();render();}
+  var n=new Date();S.nowMin=n.getHours()*60+n.getMinutes()+n.getSeconds()/60;
+  if(S.screen==="monitor"){checkNotify();render();}
 },30000);
 
-function startSim(){simTimer=setInterval(function(){S.nowMin+=0.5;checkNotify();render();},500);}
-function stopSim(){if(simTimer){clearInterval(simTimer);simTimer=null;}}
-
-// ===== バス計算 =====
+// バス計算（リアルタイム優先）
 function getBuses(){
   if(!S.route)return[];
   var iv=S.route.intervalMinutes||3.5;
+  var now=S.nowMin;
+
+  // リアルタイムデータがあれば使う
+  if(S.useRealtime&&S.realtimeVehicles.length>0&&S.route.tripIdMap){
+    var rtBuses=[];
+    S.realtimeVehicles.forEach(function(v){
+      if(!v.tripId||!S.route.tripIdMap[v.tripId])return;
+      var depTime=S.route.tripIdMap[v.tripId];
+      var delay=(S.realtimeDelays[v.tripId]||0)/60; // 秒→分
+      var times=calcTimes(depTime,S.route.stops.length,iv);
+      // 遅延を反映
+      var adjustedTimes=times.map(function(t){return t+delay;});
+      var minsToTarget=adjustedTimes[S.targetIdx]-now;
+      if(minsToTarget<-5||minsToTarget>120)return;
+      rtBuses.push({
+        id:"rt-"+v.tripId,
+        times:adjustedTimes,
+        posFloat:busPos(adjustedTimes,now),
+        minsToTarget:minsToTarget,
+        depMin:parseTime(depTime),
+        delay:delay,
+        isRealtime:true
+      });
+    });
+    if(rtBuses.length>0){
+      rtBuses.sort(function(a,b){return a.minsToTarget-b.minsToTarget;});
+      return rtBuses;
+    }
+  }
+
+  // フォールバック：時刻表ベース
   return S.route.schedules.map(function(dep,i){
     var times=calcTimes(dep,S.route.stops.length,iv);
-    return{id:"b"+i,times:times,posFloat:busPos(times,S.nowMin),minsToTarget:times[S.targetIdx]-S.nowMin,depMin:parseTime(dep)};
-  }).filter(function(b){return S.nowMin>=b.depMin&&b.times[S.targetIdx]>=S.nowMin-1;});
+    return{id:"b"+i,times:times,posFloat:busPos(times,now),minsToTarget:times[S.targetIdx]-now,depMin:parseTime(dep),delay:0,isRealtime:false};
+  }).filter(function(b){return now>=b.depMin&&b.times[S.targetIdx]>=now-1;});
 }
 
 function checkNotify(){
@@ -119,9 +177,17 @@ function checkNotify(){
     var fire=false,msg="";
     if(S.notifyMode==="stops"){
       var at=S.targetIdx-S.notifyStops;
-      if(at>=0&&bus.posFloat>=at&&bus.posFloat<at+1.2){fire=true;msg="バスが"+S.notifyStops+"つ前「"+(S.route.stops[at]?S.route.stops[at].name:"")+"」に来ました！準備して🏃";}
+      if(at>=0&&bus.posFloat>=at&&bus.posFloat<at+1.2){
+        fire=true;
+        var delayStr=bus.delay>0?"（"+Math.round(bus.delay)+"分遅れ）":bus.delay<0?"（"+Math.round(-bus.delay)+"分早め）":"";
+        msg="バスが"+S.notifyStops+"つ前「"+(S.route.stops[at]?S.route.stops[at].name:"")+"」に来ました！"+delayStr+"準備して🏃";
+      }
     }else{
-      if(bus.minsToTarget<=S.notifyMins&&bus.minsToTarget>0){fire=true;msg="バスがあと約"+Math.ceil(bus.minsToTarget)+"分で来ます！準備して🏃";}
+      if(bus.minsToTarget<=S.notifyMins&&bus.minsToTarget>0){
+        fire=true;
+        var delayStr=bus.delay>0?"（"+Math.round(bus.delay)+"分遅れ）":"";
+        msg="バスがあと約"+Math.ceil(bus.minsToTarget)+"分で来ます！"+delayStr+"準備して🏃";
+      }
     }
     if(fire){
       S.notifiedIds.push(bus.id);S.banner=msg;
@@ -131,7 +197,7 @@ function checkNotify(){
   });
 }
 
-// ===== API =====
+// API
 function handleSearch(){
   if(!S.searchQuery.trim())return;
   S.loadError="";S.searchResults=[];S.loadMsg="検索しています…";render();
@@ -145,15 +211,17 @@ function handleSearch(){
   }).catch(function(e){S.loadError=e.message;S.loadMsg="";render();});
 }
 
-function handleSelectCompany(company){
+function handleSelectCompany(idx){
+  var company=S.searchResults[idx];
   S.loadError="";S.searchResults=[];S.screen="loading";S.loadMsg="最新の時刻表を探しています…";render();
   var p;
   if(company.source==="known"){
     p=fetch(WORKER+"/?action=find_zip&id="+company.id).then(function(r){return r.json();}).then(function(data){
       if(data.error)throw new Error(data.error);
+      S.realtimeId=data.hasRealtime?company.id:null;
       return data.latestUrl;
     });
-  }else{p=Promise.resolve(company.gtfsUrl);}
+  }else{S.realtimeId=null;p=Promise.resolve(company.gtfsUrl);}
   p.then(function(gtfsUrl){
     if(!gtfsUrl)throw new Error("URLが見つかりませんでした");
     S.gtfsUrl=gtfsUrl;
@@ -178,45 +246,42 @@ function handleSelectStop(stopId){
     var newStops=result.stopList.map(function(s){return{id:s.id,name:s.name};});
     var newTargetIdx=0;
     for(var i=0;i<result.stopList.length;i++){if(result.stopList[i].id===stopId){newTargetIdx=i;break;}}
-    var newRoute={name:result.routeName,stops:newStops,schedules:result.schedules,intervalMinutes:3};
-    saveConfig({route:newRoute,targetIdx:newTargetIdx,gtfsUrl:S.gtfsUrl,notifyMode:S.notifyMode,notifyStops:S.notifyStops,notifyMins:S.notifyMins});
-    S.route=newRoute;S.targetIdx=newTargetIdx;S.notifiedIds=[];S.screen="monitor";render();
+    var newRoute={name:result.routeName,stops:newStops,schedules:result.schedules,intervalMinutes:3,tripIdMap:result.tripIdMap};
+    saveConfig({route:newRoute,targetIdx:newTargetIdx,gtfsUrl:S.gtfsUrl,realtimeId:S.realtimeId,notifyMode:S.notifyMode,notifyStops:S.notifyStops,notifyMins:S.notifyMins});
+    S.route=newRoute;S.targetIdx=newTargetIdx;S.notifiedIds=[];S.screen="monitor";
+    if(S.realtimeId)startRealtimeUpdates();
+    render();
   }).catch(function(e){S.loadError=e.message;S.screen="stop_select";render();});
 }
 
-
-
 function applyManual(){
   var stops=S.manualStops.split("\n").map(function(s){return s.trim();}).filter(Boolean).map(function(name,i){return{id:"m"+i,name:name};});
-  var schedules=S.manualTimes.split("\n").map(function(s){return s.trim();}).filter(function(s){return /^\d{1,2}:\d{2}$/.test(s);});
+  var schedules=S.manualTimes.split("\n").map(function(s){return s.trim();}).filter(function(s){return/^\d{1,2}:\d{2}$/.test(s);});
   if(stops.length<2){alert("停留所を2つ以上入力してください");return;}
-  if(!schedules.length){alert("時刻表を入力してください（例: 08:00）");return;}
+  if(!schedules.length){alert("時刻表を入力してください");return;}
   var newRoute={name:S.manualName||"手動入力路線",stops:stops,schedules:schedules,intervalMinutes:parseFloat(S.manualInterval)||3};
   var newTarget=stops.length-1;
   saveConfig({route:newRoute,targetIdx:newTarget,notifyMode:S.notifyMode,notifyStops:S.notifyStops,notifyMins:S.notifyMins});
-  S.route=newRoute;S.targetIdx=newTarget;S.notifiedIds=[];S.screen="monitor";render();
+  S.route=newRoute;S.targetIdx=newTarget;S.notifiedIds=[];S.realtimeId=null;S.screen="monitor";render();
 }
 
-// ===== 停留所リスト描画（絞り込み用）=====
 function renderStopList(allStops,filter){
-  var listEl=document.getElementById("stop-list");
-  if(!listEl)return;
-  var f=filter||"";
-  var shown=(f?allStops.filter(function(s){return(s.stop_name&&s.stop_name.indexOf(f)>=0)||(s.stop_id&&s.stop_id.indexOf(f)>=0);}):allStops).slice(0,200);
+  var el=document.getElementById("stop-list");
+  if(!el)return;
+  var shown=(filter?allStops.filter(function(s){return(s.stop_name&&s.stop_name.indexOf(filter)>=0)||(s.stop_id&&s.stop_id.indexOf(filter)>=0);}):allStops).slice(0,200);
   var h='<div style="background:#1e293b;border-radius:14px;border:1px solid #334155;overflow:hidden">';
   if(!shown.length){h+='<div style="padding:20px;text-align:center;color:#475569;font-size:13px">該当する停留所がありません</div>';}
   shown.forEach(function(s,i){
     h+='<div onclick="handleSelectStop(\''+esc(s.stop_id)+'\')" style="padding:13px 16px;border-bottom:'+(i<shown.length-1?"1px solid #1e3a5f":"none")+';cursor:pointer;display:flex;align-items:center;gap:12px">'
-    +'<div style="width:30px;height:30px;border-radius:50%;background:#0ea5e922;border:1px solid #0ea5e933;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🚏</div>'
+    +'<div style="width:30px;height:30px;border-radius:50%;background:#0ea5e922;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🚏</div>'
     +'<div style="flex:1"><div style="font-size:15px;color:#e2e8f0">'+esc(s.stop_name)+'</div>'
     +'<div style="font-size:11px;color:#334155;margin-top:2px">'+esc(s.stop_id)+'</div></div>'
     +'<div style="color:#334155;font-size:20px">›</div></div>';
   });
-  h+='</div><div style="font-size:11px;color:#1e3a5f;text-align:center;margin-top:10px">'+(shown.length<200?shown.length+"件":"上位200件表示")+'</div>';
-  listEl.innerHTML=h;
+  h+='</div><div style="font-size:11px;color:#1e3a5f;text-align:center;margin-top:10px">'+(shown.length<200?shown.length+"件":"上位200件")+'</div>';
+  el.innerHTML=h;
 }
 
-// ===== レンダリング =====
 function render(){
   var app=document.getElementById("app");
   var html="";
@@ -226,18 +291,16 @@ function render(){
   var mins=nextBus?Math.ceil(nextBus.minsToTarget):null;
   var isUrgent=mins!==null&&mins<=3;
   var notifyAtIdx=S.notifyMode==="stops"?Math.max(0,S.targetIdx-S.notifyStops):null;
-  var filtered=S.stopFilter?S.allStops.filter(function(s){return(s.stop_name&&s.stop_name.indexOf(S.stopFilter)>=0)||(s.stop_id&&s.stop_id.indexOf(S.stopFilter)>=0);}):S.allStops;
 
   // バナー
   if(S.banner){
-    html+='<div id="ban" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:200;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:white;padding:13px 18px;border-radius:16px;box-shadow:0 8px 32px rgba(14,165,233,0.5);max-width:90vw;display:flex;align-items:center;gap:12px">'
+    html+='<div style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:200;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:white;padding:13px 18px;border-radius:16px;box-shadow:0 8px 32px rgba(14,165,233,0.5);max-width:90vw;display:flex;align-items:center;gap:12px;animation:slideDown 0.3s ease">'
     +'<span style="font-size:22px">🔔</span>'
     +'<span style="font-size:14px;font-weight:600;flex:1">'+esc(S.banner)+'</span>'
     +'<button onclick="S.banner=null;render()" style="background:rgba(255,255,255,0.2);border:none;color:white;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px">閉じる</button>'
     +'</div>';
   }
 
-  // ローディング
   if(S.screen==="loading"){
     html+='<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">'
     +'<div style="font-size:48px;margin-bottom:24px">🚌</div>'
@@ -247,13 +310,12 @@ function render(){
     app.innerHTML=html;return;
   }
 
-  // ウェルカム
   if(S.screen==="welcome"){
     html+='<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 0">'
     +'<div style="text-align:center;margin-bottom:32px">'
     +'<div style="font-size:52px;margin-bottom:12px;animation:float 2.5s ease-in-out infinite">🚌</div>'
     +'<div style="font-size:22px;font-weight:800;margin-bottom:8px">バス接近通知</div>'
-    +'<div style="font-size:13px;color:#475569;line-height:1.8">バス会社名を入力するだけで<br>最新の時刻表を自動で取得します</div>'
+    +'<div style="font-size:13px;color:#475569;line-height:1.8">バス会社名を入力するだけで<br>リアルタイム位置情報を取得します</div>'
     +'</div>'
     +'<div style="width:100%;max-width:380px">'
     +'<div style="display:flex;gap:8px;margin-bottom:14px">'
@@ -266,10 +328,10 @@ function render(){
       html+='<div style="background:#1e293b;border-radius:14px;border:1px solid #334155;overflow:hidden;margin-bottom:14px">'
       +'<div style="font-size:11px;color:#475569;padding:10px 16px 6px">検索結果 '+S.searchResults.length+'件</div>';
       S.searchResults.forEach(function(co,i){
-        html+='<div onclick="handleSelectCompany(S.searchResults['+i+'])" style="padding:14px 16px;border-top:1px solid #1e3a5f;cursor:pointer;display:flex;align-items:center;gap:12px">'
-        +'<div style="width:36px;height:36px;border-radius:10px;background:#0ea5e922;border:1px solid #0ea5e944;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🚌</div>'
+        html+='<div onclick="handleSelectCompany('+i+')" style="padding:14px 16px;border-top:1px solid #1e3a5f;cursor:pointer;display:flex;align-items:center;gap:12px">'
+        +'<div style="width:36px;height:36px;border-radius:10px;background:#0ea5e922;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🚌</div>'
         +'<div style="flex:1"><div style="font-size:15px;font-weight:600">'+esc(co.name)+'</div>'
-        +'<div style="font-size:11px;color:#475569;margin-top:2px">'+(co.source==="known"?"自社HP公開":"国交省データ")+'</div></div>'
+        +'<div style="font-size:11px;color:#475569;margin-top:2px">'+(co.hasRealtime?'<span style="color:#22c55e">● リアルタイム対応</span>':'時刻表のみ')+'</div></div>'
         +'<div style="color:#334155;font-size:20px">›</div></div>';
       });
       html+='</div>';
@@ -282,15 +344,9 @@ function render(){
     return;
   }
 
-  // 停留所選択
   if(S.screen==="stop_select"){
-    // 入力欄が既にあればリストだけ更新（キーボードが消えないように）
     var existingSf=document.getElementById("sf");
-    if(existingSf){
-      renderStopList(S.allStops,S.stopFilter);
-      return;
-    }
-    // 初回描画
+    if(existingSf){renderStopList(S.allStops,S.stopFilter);return;}
     html+='<div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:28px 20px 20px;margin:-14px -14px 14px">'
     +'<button onclick="S.screen=\'welcome\';render()" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;color:white;padding:6px 12px;font-size:13px;cursor:pointer;margin-bottom:14px;display:block">← 戻る</button>'
     +'<div style="font-size:20px;font-weight:800;margin-bottom:6px">乗る停留所を選んでください</div>'
@@ -299,45 +355,15 @@ function render(){
     +'<div class="card"><input id="sf" type="text" class="inp" placeholder="🔍 停留所名で絞り込み…"></div>'
     +'<div id="stop-list"></div>';
     app.innerHTML=html;
-    document.getElementById("sf").addEventListener("input",function(e){
-      S.stopFilter=e.target.value;
-      renderStopList(S.allStops,S.stopFilter);
-    });
+    document.getElementById("sf").addEventListener("input",function(e){S.stopFilter=e.target.value;renderStopList(S.allStops,S.stopFilter);});
     renderStopList(S.allStops,S.stopFilter);
     return;
   }
 
-  // 手動入力
   if(S.screen==="manual"){
     html+='<button onclick="S.screen=\'welcome\';render()" style="background:#1e293b;border:1px solid #334155;border-radius:8px;color:#64748b;padding:6px 12px;font-size:13px;cursor:pointer;margin-bottom:16px;display:block">← 戻る</button>'
     +'<div style="font-size:17px;font-weight:700;margin-bottom:16px">✏️ 手動で時刻表を入力</div>'
-    +'<label class="lbl" style="margin-top:0">路線名</label><input id="mn" type="text" class="inp" placeholder="例: ○○バス 駅前循環線" value="'+esc(S.manualName)+'" style="margin-bottom:14px">'
-    +'<label class="lbl">停留所（1行に1つ、始発から順に）</label><textarea id="ms" class="inp" rows="5" placeholder="中央駅前&#10;市役所前&#10;図書館通り&#10;あなたの停留所" style="margin-bottom:14px;resize:vertical">'+esc(S.manualStops)+'</textarea>'
-    +'<label class="lbl">出発時刻（1行に1つ）</label><textarea id="mt" class="inp" rows="5" placeholder="08:00&#10;08:20&#10;08:40" style="margin-bottom:14px;resize:vertical">'+esc(S.manualTimes)+'</textarea>'
-    +'<label class="lbl">停留所間の平均時間（分）</label><input id="mi" type="text" class="inp" value="'+esc(S.manualInterval)+'" placeholder="3" style="margin-bottom:20px">'
-    +'<button onclick="S.manualName=document.getElementById(\'mn\').value;S.manualStops=document.getElementById(\'ms\').value;S.manualTimes=document.getElementById(\'mt\').value;S.manualInterval=document.getElementById(\'mi\').value;applyManual()" class="btn" style="width:100%;padding:14px 0;background:linear-gradient(135deg,#059669,#0891b2);color:white;font-size:15px">✅ この内容で設定する</button>';
-    app.innerHTML=html;return;
-  }
-
-  // モニター
-  if(!S.route){app.innerHTML="";return;}
-
-  // ヘッダー
-  html+='<div style="background:linear-gradient(180deg,#0f1f3d 0%,#0a1628 100%);padding:16px 16px 0;margin:-14px -14px 14px;border-bottom:1px solid #0f1f3d">'
-  +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'
-  +'<span style="font-size:24px;animation:float 2.5s ease-in-out infinite">🚌</span>'
-  +'<div style="flex:1">'
-  +'<div style="font-size:16px;font-weight:700">バス接近通知</div>'
-  +'<div style="font-size:11px;color:#334155;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">'+esc(S.route.name)+'</div>'
-  +'</div>'
-  +'<div style="text-align:right;flex-shrink:0">'
-  +'<div style="font-size:24px;font-weight:800;color:#38bdf8;font-variant-numeric:tabular-nums;line-height:1">'+formatTime(S.nowMin)+'</div>'
-  +(S.simMode?'<div style="font-size:10px;color:#f59e0b;margin-top:2px">シミュ中</div>':'')
-  +'</div></div></div>';
-
-  // 次のバスカード
-  if(nextBus){
-    html+='<div style="background:'+(isUrgent?"linear-gradient(135deg,#7f1d1d,#450a0a)":"linear-gradient(135deg,#0f2847,#0a1628)")+';border-radius:20px;padding:20px;border:1px solid '+(isUrgent?"#ef4444":"#1e3a5f")+';margin-bottom:14px;animation:'+(isUrgent?"urgent 1.5s infinite":"none")+'">'
-    +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-    +'<div><div style="font-size:11px;color:'+(isUrgent?"#f87171":"#475569")+';margin-bottom:4px">'+(isUrgent?"⚡ もうすぐ来ます！":"次のバスまで")+'</div>'
-    +'<div style="display:flex;align
+    +'<div style="font-size:12px;color:#64748b;margin-bottom:4px">路線名</div><input id="mn" type="text" class="inp" placeholder="例: ○○バス 駅前循環線" value="'+esc(S.manualName)+'" style="margin-bottom:14px">'
+    +'<div style="font-size:12px;color:#64748b;margin-bottom:4px">停留所（1行に1つ、始発から順に）</div><textarea id="ms" class="inp" rows="5" placeholder="中央駅前&#10;市役所前&#10;あなたの停留所" style="margin-bottom:14px;resize:vertical">'+esc(S.manualStops)+'</textarea>'
+    +'<div style="font-size:12px;color:#64748b;margin-bottom:4px">出発時刻（1行に1つ）</div><textarea id="mt" class="inp" rows="5" placeholder="08:00&#10;08:20&#10;08:40" style="margin-bottom:14px;resize:vertical">'+esc(S.manualTimes)+'</textarea>'
+    +'<div s
