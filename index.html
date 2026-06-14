@@ -196,6 +196,25 @@ function applyManual(){
   S.route=newRoute;S.targetIdx=newTarget;S.notifiedIds=[];S.screen="monitor";render();
 }
 
+// ===== 停留所リスト描画（絞り込み用）=====
+function renderStopList(allStops,filter){
+  var listEl=document.getElementById("stop-list");
+  if(!listEl)return;
+  var f=filter||"";
+  var shown=(f?allStops.filter(function(s){return(s.stop_name&&s.stop_name.indexOf(f)>=0)||(s.stop_id&&s.stop_id.indexOf(f)>=0);}):allStops).slice(0,200);
+  var h='<div style="background:#1e293b;border-radius:14px;border:1px solid #334155;overflow:hidden">';
+  if(!shown.length){h+='<div style="padding:20px;text-align:center;color:#475569;font-size:13px">該当する停留所がありません</div>';}
+  shown.forEach(function(s,i){
+    h+='<div onclick="handleSelectStop(\''+esc(s.stop_id)+'\')" style="padding:13px 16px;border-bottom:'+(i<shown.length-1?"1px solid #1e3a5f":"none")+';cursor:pointer;display:flex;align-items:center;gap:12px">'
+    +'<div style="width:30px;height:30px;border-radius:50%;background:#0ea5e922;border:1px solid #0ea5e933;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🚏</div>'
+    +'<div style="flex:1"><div style="font-size:15px;color:#e2e8f0">'+esc(s.stop_name)+'</div>'
+    +'<div style="font-size:11px;color:#334155;margin-top:2px">'+esc(s.stop_id)+'</div></div>'
+    +'<div style="color:#334155;font-size:20px">›</div></div>';
+  });
+  h+='</div><div style="font-size:11px;color:#1e3a5f;text-align:center;margin-top:10px">'+(shown.length<200?shown.length+"件":"上位200件表示")+'</div>';
+  listEl.innerHTML=h;
+}
+
 // ===== レンダリング =====
 function render(){
   var app=document.getElementById("app");
@@ -264,28 +283,26 @@ function render(){
 
   // 停留所選択
   if(S.screen==="stop_select"){
+    // 入力欄が既にあればリストだけ更新（キーボードが消えないように）
+    var existingSf=document.getElementById("sf");
+    if(existingSf){
+      renderStopList(S.allStops,S.stopFilter);
+      return;
+    }
+    // 初回描画
     html+='<div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:28px 20px 20px;margin:-14px -14px 14px">'
     +'<button onclick="S.screen=\'welcome\';render()" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;color:white;padding:6px 12px;font-size:13px;cursor:pointer;margin-bottom:14px;display:block">← 戻る</button>'
     +'<div style="font-size:20px;font-weight:800;margin-bottom:6px">乗る停留所を選んでください</div>'
     +'<div style="font-size:13px;color:rgba(255,255,255,0.7)">一度設定すれば次回から自動で起動します</div>'
     +'</div>'
-    +'<div class="card"><input id="sf" type="text" class="inp" placeholder="🔍 停留所名で絞り込み…" value="'+esc(S.stopFilter)+'"></div>';
-    if(S.loadError)html+='<div style="background:#450a0a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#f87171">'+esc(S.loadError)+'</div>';
-    html+='<div style="background:#1e293b;border-radius:14px;border:1px solid #334155;overflow:hidden">';
-    var shown=filtered.slice(0,200);
-    if(!shown.length)html+='<div style="padding:20px;text-align:center;color:#475569;font-size:13px">該当する停留所がありません</div>';
-    shown.forEach(function(s,i){
-      html+='<div onclick="handleSelectStop(\''+esc(s.stop_id)+'\')" style="padding:13px 16px;border-bottom:'+(i<shown.length-1?"1px solid #1e3a5f":"none")+';cursor:pointer;display:flex;align-items:center;gap:12px">'
-      +'<div style="width:30px;height:30px;border-radius:50%;background:#0ea5e922;border:1px solid #0ea5e933;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🚏</div>'
-      +'<div style="flex:1"><div style="font-size:15px;color:#e2e8f0">'+esc(s.stop_name)+'</div>'
-      +'<div style="font-size:11px;color:#334155;margin-top:2px">'+esc(s.stop_id)+'</div></div>'
-      +'<div style="color:#334155;font-size:20px">›</div></div>';
-    });
-    html+='</div>'
-    +'<div style="font-size:11px;color:#1e3a5f;text-align:center;margin-top:10px">'+(filtered.length>200?"上位200件表示（全"+filtered.length+"件）":filtered.length+"件")+'</div>';
+    +'<div class="card"><input id="sf" type="text" class="inp" placeholder="🔍 停留所名で絞り込み…"></div>'
+    +'<div id="stop-list"></div>';
     app.innerHTML=html;
-    var sf=document.getElementById("sf");
-    if(sf)sf.oninput=function(e){S.stopFilter=e.target.value;render();};
+    document.getElementById("sf").addEventListener("input",function(e){
+      S.stopFilter=e.target.value;
+      renderStopList(S.allStops,S.stopFilter);
+    });
+    renderStopList(S.allStops,S.stopFilter);
     return;
   }
 
