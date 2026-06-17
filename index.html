@@ -39,7 +39,7 @@ body{font-family:'Hiragino Sans','Noto Sans JP',sans-serif;min-height:100vh;tran
 <body>
 <div id="app"></div>
 <script>
-// Cloudflare Workers の正しいエンドポイントURL
+// Cloudflare Workers のエンドポイントURL
 var W = "https://cold-recipe-799d.kikucchao.workers.dev";
 
 // 全アプリケーション状態
@@ -69,7 +69,8 @@ var S = {
 var T = {};
 function checkTheme(){
   var h = new Date().getHours();
-  if(h rolls >= 18 || h < 6){
+  // タイポ（h rolls）を修正
+  if(h >= 18 || h < 6){
     S.theme = 'dark';
     T = {bg:'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',card:'rgba(30,41,59,0.75)',text:'#f8fafc',sub:'#94a3b8',acc:'#a78bfa',btn:'#334155',bTxt:'#f8fafc',inputBorder:'rgba(255,255,255,0.15)'};
   }else{
@@ -124,14 +125,13 @@ function getTodayServiceIds(calendarRows){
   return ids;
 }
 
-// 1. バス会社検索（Workersとの連携パラメータを修正）
+// 1. バス会社検索
 async function searchCompany(){
   var q = document.getElementById("coSearch")?.value || "";
   S.searchQuery = q;
   if(!q.trim()) return;
   l("🔍 検索中: " + q);
   try {
-    // Workersのロジックに合わせて検索エンドポイントパラメータをマッピング
     var r = await fetch(W + "/?action=search&q=" + encodeURIComponent(q));
     var d = await r.json();
     if(d.error) { l("❌ " + d.error); return; }
@@ -169,11 +169,9 @@ async function selectCompany(selected){
     
     S.rawFiles = d2.files;
     
-    // バス停データのマッピング（上り・下りの方向情報を紐付けるために下準備）
     var stopTimesRows = parseCSV(S.rawFiles["stop_times.txt"]);
     var tripsRows = parseCSV(S.rawFiles["trips.txt"]);
     
-    // trip_id から 行先（trip_headsign）をすぐに引ける辞書を作る
     var tripHeadsignMap = {};
     tripsRows.forEach(t => {
       if(t.trip_id && t.trip_headsign) {
@@ -181,7 +179,6 @@ async function selectCompany(selected){
       }
     });
 
-    // 各stop_idがどの「行先（方面）」を持つ便に使われているかを調べる
     var stopDirections = {};
     stopTimesRows.forEach(st => {
       var headsign = tripHeadsignMap[st.trip_id];
@@ -197,7 +194,6 @@ async function selectCompany(selected){
     stopsRows.forEach(s => {
       if(!s.stop_id || !s.stop_name) return;
       
-      // 方面行先リストを取得
       var dirSet = stopDirections[s.stop_id];
       var dirStr = "";
       if(s.stop_desc && s.stop_desc.trim()) {
@@ -206,11 +202,10 @@ async function selectCompany(selected){
         dirStr = " (" + Array.from(dirSet).join('/') + ")";
       }
       
-      // 重複排除をせず、のりば・方面ごとに個別のバス停オブジェクトとしてすべて登録
       S.stops.push({
         id: s.stop_id,
         name: s.stop_name,
-        fullName: s.stop_name + dirStr // 画面上に表示する方面付きの名前
+        fullName: s.stop_name + dirStr
       });
     });
     
@@ -223,7 +218,7 @@ async function selectCompany(selected){
   }
 }
 
-// バス停入力の絞り込み処理（文字入力バグ対策）
+// バス停入力の絞り込み処理
 function onStopInput(el) {
   var q = el.value.trim();
   if(!q){ S.sStops = S.stops.slice(0,50); }
@@ -285,7 +280,6 @@ async function selectStop(sid, fullStopName){
     arr.sort((a,b)=>a.min-b.min);
     S.trips = arr;
     
-    // 現在時刻に一番近い次発の便を自動フォーカス
     var nextIdx = S.trips.findIndex(t => t.min >= curMin);
     if(nextIdx !== -1) S.ti = nextIdx;
     else if(S.trips.length > 0) S.ti = 0;
@@ -349,7 +343,6 @@ function drt(){
         return;
       }
       
-      // リアルタイム位置確認
       var r = await fetch(W + "/?action=realtime&id=" + encodeURIComponent(S.co.id));
       var d = await r.json();
       if(d.error){ l("❌ リアルタイム追跡が一時的に途切れました"); return; }
@@ -395,7 +388,6 @@ function render(){
   +'<span><span class="title-bus">🚌</span> Bus KURU</span>'
   +'<span style="font-size:12px;background:'+T.btn+';padding:4px 8px;border-radius:20px;color:'+T.bTxt+'">'+(S.theme==='dark'?'🌙 夜間モード':'☀️ 昼間モード')+'</span></div>';
   
-  // 運行詳細画面（バス停および対象便の確定時）
   if(S.sid && S.ti >= 0 && S.routeStops.length > 0){
     var tr = S.trips[S.ti];
     var now = new Date();
@@ -474,7 +466,6 @@ function render(){
     html += '</div>';
     
   } else {
-    // 1. バス会社検索カード
     html += '<div class="card" style="background:'+T.card+'">'
     +'<div style="font-weight:700;margin-bottom:8px;font-size:13px;color:'+T.sub+'">乗車するバス会社を探す</div>'
     +'<div style="display:flex;gap:6px"><input id="coSearch" type="text" class="input-text" style="margin-bottom:0" placeholder="例：〇〇バス、△△交通" value="'+e(S.searchQuery)+'" onkeydown="if(event.key===\'Enter\')searchCompany()">'
@@ -494,7 +485,6 @@ function render(){
     if(S.co) html += '<div style="margin-top:10px;font-weight:bold;color:'+T.acc+'">選択中の事業者：'+e(S.co.name)+'</div>';
     html += '</div>';
     
-    // 2. バス停選択カード（方面を区別して縦に表示）
     if(S.co){
       html += '<div class="card" style="background:'+T.card+'">'
       +'<div style="font-weight:700;margin-bottom:8px;font-size:13px;color:'+T.sub+'">乗車するバス停・のりば（方面）の指定</div>'
@@ -510,7 +500,6 @@ function render(){
     }
   }
   
-  // デバッグ用システムログ
   html += '<div style="margin-top:15px"><div style="font-size:11px;color:'+T.sub+';margin-bottom:4px;font-weight:bold">🛠️ システム動作ログ</div>'
   +'<textarea readonly style="width:100%;height:80px;background:rgba(0,0,0,0.05);border:none;border-radius:10px;padding:8px;font-family:monospace;font-size:11px;color:'+T.sub+';resize:none">'+e(S.log)+'</textarea></div>';
   
