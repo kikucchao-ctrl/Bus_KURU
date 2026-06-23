@@ -660,7 +660,7 @@ function render(){
     if(nextInfo){
       nextStr='<div style="font-size:13px;color:'+T.acc+';margin-top:8px;font-weight:600">'
       +(nextInfo.isToday?"本日":"翌日")+'の次の便: '+ft(nextInfo.time)+'着予定'
-      +'<div style="font-size:11px;color:'+T.sub+';font-weight:400;margin-top:2px">約'+Math.ceil(nextInfo.mtt/60)+'時間'+Math.round(nextInfo.mtt%60)+'分後</div>'
+      +'<div style="font-size:11px;color:'+T.sub+';font-weight:400;margin-top:2px">約'+(nextInfo.mtt<60?Math.ceil(nextInfo.mtt)+'分後':Math.floor(nextInfo.mtt/60)+'時間'+Math.round(nextInfo.mtt%60)+'分後')+'</div>'
       +'</div>';
     }
     html+='<div style="background:'+T.card+';border-radius:20px;padding:22px;border:1px solid '+T.border+';margin-bottom:14px;text-align:center">'
