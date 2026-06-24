@@ -268,11 +268,24 @@ function gb(){
   var iv=S.route.iv||3.5,now=S.now;
 
   function getBestTripId(){
-    if(!S.route.timetable)return null;
+    // GPSデータに実際に存在するtripIdを時刻付きで集める
+    var gpsTripIds=new Set();
+    S.rv.forEach(function(v){if(v.tripId)gpsTripIds.add(v.tripId);});
+
+    // 時刻表から「現在時刻以降で最初の便」を順番に探す
     var dt=S.timetableDayType;
-    var entries=S.route.timetable[dt]||[];
+    var entries=S.route.timetable?S.route.timetable[dt]||[]:[];
     for(var i=0;i<entries.length;i++){
-      if(pt(entries[i].timeStr)>now-5)return entries[i].tripId;
+      var en=entries[i];
+      // 現在時刻の5分前以降の便を対象にする（遅延を考慮して少し余裕を持つ）
+      if(pt(en.timeStr)<now-15)continue;
+      // GPS上にそのtripIdのバスが実際に存在するなら最優先で採用
+      if(gpsTripIds.has(en.tripId))return en.tripId;
+    }
+
+    // GPS上に一致するtripIdがない場合：時刻表の次の便のtripIdをそのまま返す
+    for(var j=0;j<entries.length;j++){
+      if(pt(entries[j].timeStr)>now-5)return entries[j].tripId;
     }
     return entries.length?entries[0].tripId:null;
   }
