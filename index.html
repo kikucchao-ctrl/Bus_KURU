@@ -332,22 +332,64 @@ function gb(){
       var exactMatch=S.rv.filter(function(v){return v.tripId===bestTripId;});
       if(exactMatch.length>0){
         var v2=exactMatch[0];
+        var dl2=(S.rd[bestTripId]||0)/60;
+
+        // GTFSの実時刻から乗車停留所への到着予定時刻を計算する
+        function getMttFromStopTimes(tripId,currentStopIdx){
+          var st=S.route.stopTimes&&S.route.stopTimes[tripId];
+          if(!st)return null;
+          // 乗車停留所の予定時刻
+          var targetStop=S.route.stops[S.ti];
+          if(!targetStop)return null;
+          var targetTime=st[targetStop.id];
+          if(!targetTime)return null;
+          var targetMin=pt(targetTime)+dl2;
+          // 現在いる停留所の予定時刻
+          var currentStop=S.route.stops[currentStopIdx];
+          if(currentStop){
+            var currentTime=st[currentStop.id];
+            if(currentTime){
+              // 現在停留所の予定時刻と実際の時刻のズレを遅延として加算
+              var scheduledNow=pt(currentTime);
+              var actualDelay=now-scheduledNow;
+              // 遅延が異常値（30分以上）でなければ反映
+              if(actualDelay>-5&&actualDelay<30){
+                return targetMin+actualDelay-now;
+              }
+            }
+          }
+          return targetMin-now;
+        }
+
         if(stopsHaveCoords&&v2.lat&&v2.lon){
           var pos2=gpsToRoutePos(v2.lat,v2.lon,S.route.stops);
           if(pos2>=0){
-            var dl2=(S.rd[bestTripId]||0)/60;
-            var stopsLeft2=S.ti-pos2;
-            var mtt2=stopsLeft2*iv+dl2;
+            var mtt2=getMttFromStopTimes(bestTripId,Math.round(pos2));
+            // GTFSの実時刻が使えない場合は停留所数×iv分で計算
+            if(mtt2===null){
+              var stopsLeft2=S.ti-pos2;
+              mtt2=stopsLeft2*iv+dl2;
+            }
             if(mtt2>-5&&mtt2<120){
               return[{id:"r-"+bestTripId,times:[],pos:pos2,mtt:mtt2,dl:dl2,rt:true,lat:v2.lat,lon:v2.lon}];
             }
           }
         }else if(S.route.tm&&S.route.tm[bestTripId]){
-          var dep=S.route.tm[bestTripId],dl3=(S.rd[bestTripId]||0)/60;
-          var times=ct(dep,S.route.stops.length,iv).map(function(t){return t+dl3;});
-          var mtt3=times[S.ti]-now;
+          // 座標が使えない場合：GTFSの乗車停留所到着時刻から直接計算
+          var targetStop2=S.route.stops[S.ti];
+          var mtt3=null;
+          if(targetStop2&&S.route.stopTimes&&S.route.stopTimes[bestTripId]){
+            var tTime=S.route.stopTimes[bestTripId][targetStop2.id];
+            if(tTime)mtt3=pt(tTime)+dl2-now;
+          }
+          if(mtt3===null){
+            var dep=S.route.tm[bestTripId],dl3=dl2;
+            var times=ct(dep,S.route.stops.length,iv).map(function(t){return t+dl3;});
+            mtt3=times[S.ti]-now;
+          }
           if(mtt3>-5&&mtt3<120){
-            return[{id:"r-"+bestTripId,times:times,pos:gp(times,now),mtt:mtt3,dl:dl3,rt:true}];
+            var pos3b=S.route.tm[bestTripId]?gp(ct(S.route.tm[bestTripId],S.route.stops.length,iv),now):-1;
+            return[{id:"r-"+bestTripId,times:[],pos:pos3b,mtt:mtt3,dl:dl2,rt:true}];
           }
         }
       }
