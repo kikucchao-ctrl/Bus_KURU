@@ -267,20 +267,16 @@ function gb(){
   if(!S.route)return[];
   var iv=S.route.iv||3.5,now=S.now;
 
-  // 次の便のtripIdを時刻表から特定する
   function getBestTripId(){
     if(!S.route.timetable)return null;
     var dt=S.timetableDayType;
     var entries=S.route.timetable[dt]||[];
-    // 現在時刻以降で最初の便を探す
     for(var i=0;i<entries.length;i++){
       if(pt(entries[i].timeStr)>now-5)return entries[i].tripId;
     }
-    // 全便が過ぎていたら最初の便
     return entries.length?entries[0].tripId:null;
   }
 
-  // targetBus指定中：その便のGPSまたは時刻表推定だけを返す
   if(S.targetBus){
     var targetTime=S.targetBus.arrivalMin;
     var mtt=targetTime-now;
@@ -304,14 +300,11 @@ function gb(){
     return[{id:"target-timetable",times:[],pos:-1,mtt:mtt,dl:0,rt:false}];
   }
 
-  // targetBus未指定：次の便のtripIdで絞り込む
   if(S.rid&&S.rv.length>0){
     var rb=[];
     var stopsHaveCoords=S.route.stops&&S.route.stops.some(function(s){return s.lat&&s.lon;});
     var bestTripId=getBestTripId();
     var routeTripIds=S.route.routeTripIds||new Set();
-
-    // まず次の便のtripIdで1台に絞る
     if(bestTripId){
       var exactMatch=S.rv.filter(function(v){return v.tripId===bestTripId;});
       if(exactMatch.length>0){
@@ -336,8 +329,6 @@ function gb(){
         }
       }
     }
-
-    // 次の便が見つからない場合は路線内の全バスから座標で探す（フォールバック）
     if(stopsHaveCoords){
       S.rv.forEach(function(v){
         if(!v.lat||!v.lon)return;
@@ -354,64 +345,6 @@ function gb(){
     }
   }
 
-  // GPS使えない場合は時刻表ベース
-  return S.route.schedules.map(function(dep,i){
-    var times=ct(dep,S.route.stops.length,iv);
-    return{id:"b"+i,times:times,pos:gp(times,now),mtt:times[S.ti]-now,dm:pt(dep),dl:0,rt:false};
-  }).filter(function(b){return now>=(b.dm||0)&&b.times[S.ti]>=now-1;});
-}
-
-  // 以下は従来通り（targetBus未指定）
-  if(S.rid&&S.rv.length>0){
-    var rb=[];
-    var stopsHaveCoords=S.route.stops&&S.route.stops.some(function(s){return s.lat&&s.lon;});
-    var routeTripIds=S.route.routeTripIds||new Set();
-    var matchedByTripId=[];
-    if(routeTripIds.size>0){
-      S.rv.forEach(function(v){
-        if(!v.tripId)return;
-        if(!routeTripIds.has(v.tripId))return;
-        matchedByTripId.push(v);
-      });
-    }
-    if(matchedByTripId.length>0){
-      if(stopsHaveCoords){
-        matchedByTripId.forEach(function(v){
-          if(!v.lat||!v.lon)return;
-          var pos=gpsToRoutePos(v.lat,v.lon,S.route.stops);
-          if(pos<0)return;
-          var dl=(S.rd[v.tripId]||0)/60;
-          var stopsLeft=S.ti-pos;
-          var mtt=stopsLeft*iv+dl;
-          if(mtt<-5||mtt>120)return;
-          rb.push({id:"r-"+v.id,times:[],pos:pos,mtt:mtt,dl:dl,rt:true,lat:v.lat,lon:v.lon});
-        });
-      }else{
-        matchedByTripId.forEach(function(v){
-          if(!v.tripId||!S.route.tm[v.tripId])return;
-          var dep=S.route.tm[v.tripId],dl=(S.rd[v.tripId]||0)/60;
-          var times=ct(dep,S.route.stops.length,iv).map(function(t){return t+dl;});
-          var mtt=times[S.ti]-now;
-          if(mtt<-5||mtt>120)return;
-          rb.push({id:"r-"+v.tripId,times:times,pos:gp(times,now),mtt:mtt,dl:dl,rt:true});
-        });
-      }
-      if(rb.length){rb.sort(function(a,b){return a.mtt-b.mtt;});return rb;}
-    }
-    if(stopsHaveCoords){
-      S.rv.forEach(function(v){
-        if(!v.lat||!v.lon)return;
-        var pos=gpsToRoutePos(v.lat,v.lon,S.route.stops);
-        if(pos<0)return;
-        var dl=(S.rd[v.tripId]||0)/60;
-        var stopsLeft=S.ti-pos;
-        var mtt=stopsLeft*iv+dl;
-        if(mtt<-5||mtt>120)return;
-        rb.push({id:"r-"+v.id,times:[],pos:pos,mtt:mtt,dl:dl,rt:true,lat:v.lat,lon:v.lon});
-      });
-      if(rb.length){rb.sort(function(a,b){return a.mtt-b.mtt;});return rb;}
-    }
-  }
   return S.route.schedules.map(function(dep,i){
     var times=ct(dep,S.route.stops.length,iv);
     return{id:"b"+i,times:times,pos:gp(times,now),mtt:times[S.ti]-now,dm:pt(dep),dl:0,rt:false};
