@@ -20,15 +20,15 @@ body{font-family:'Hiragino Sans','Noto Sans JP',sans-serif;min-height:100vh;tran
 var W="https://cold-recipe-799d.kikucchao.workers.dev";
 
 function getTheme(){
-  var now=gn();
+  var h=new Date().getHours();
+  var nowMin=h*60+new Date().getMinutes()+new Date().getSeconds()/60;
   try{
     if(S&&S.route&&S.route.arrivalTimes&&S.route.arrivalTimes.length){
       var first=pt(S.route.arrivalTimes[0]);
       var last=pt(S.route.arrivalTimes[S.route.arrivalTimes.length-1]);
-      if(now<first-30||now>last+10)return"night";
+      if(nowMin<first-30||nowMin>last+10)return"night";
     }
   }catch(x){}
-  var h=new Date().getHours();
   if(h>=5&&h<8)return"dawn";
   if(h>=8&&h<17)return"day";
   if(h>=17&&h<19)return"dusk";
