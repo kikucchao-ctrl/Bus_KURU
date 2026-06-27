@@ -495,6 +495,23 @@ setInterval(function(){
   cn();if(S.scr==="monitor")render();
 },10000);
 
+function playAlarm(){
+  try{
+    var ctx=new(window.AudioContext||window.webkitAudioContext)();
+    function beep(freq,start,dur){
+      var o=ctx.createOscillator();
+      var g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.frequency.value=freq;o.type="sine";
+      g.gain.setValueAtTime(0,ctx.currentTime+start);
+      g.gain.linearRampToValueAtTime(0.4,ctx.currentTime+start+0.02);
+      g.gain.linearRampToValueAtTime(0,ctx.currentTime+start+dur);
+      o.start(ctx.currentTime+start);o.stop(ctx.currentTime+start+dur+0.05);
+    }
+    beep(880,0,0.15);beep(1100,0.2,0.15);beep(880,0.4,0.15);beep(1100,0.6,0.3);
+  }catch(ex){}
+}
+
 function cn(){
   if(S.scr!=="monitor"||!S.route)return;
   var buses=S.buses||gb();
