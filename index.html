@@ -1107,6 +1107,40 @@ if(cfg&&cfg.route){
   S.scr="welcome";
 }
 render();
+// サービスワーカーを登録する（通知の土台）
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').then(function(reg){
+    console.log('サービスワーカー登録成功');
+  }).catch(function(err){
+    console.log('サービスワーカー登録失敗:', err);
+  });
+}
+
+// テスト通知ボタンを画面に追加する（一時的な確認用）
+function showTestNotifBtn(){
+  var btn=document.createElement('button');
+  btn.textContent='🔔 通知テスト';
+  btn.style.cssText='position:fixed;bottom:14px;right:14px;z-index:500;padding:10px 14px;border-radius:20px;background:#7c3aed;color:white;border:none;font-size:13px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
+  btn.onclick=function(){
+    if(Notification.permission!=='granted'){
+      Notification.requestPermission().then(function(p){
+        if(p==='granted')sendTestNotif();
+        else alert('通知が許可されませんでした。スマホの設定をご確認ください。');
+      });
+    }else{
+      sendTestNotif();
+    }
+  };
+  document.body.appendChild(btn);
+}
+function sendTestNotif(){
+  navigator.serviceWorker.ready.then(function(reg){
+    reg.active.postMessage({type:'TEST_NOTIFICATION',body:'この通知が見えればサービスワーカーは成功です！'});
+  });
+}
+if('serviceWorker' in navigator && 'Notification' in window){
+  showTestNotifBtn();
+}
 </script>
 </body>
 </html>
