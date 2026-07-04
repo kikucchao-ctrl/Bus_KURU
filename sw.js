@@ -13,7 +13,17 @@ self.addEventListener('push',function(event){
 });
 self.addEventListener('notificationclick',function(event){
   event.notification.close();
-  event.waitUntil(clients.openWindow('/Bus_KURU/'));
+  event.waitUntil(
+    clients.matchAll({type:'window',includeUncontrolled:true}).then(function(clientList){
+      for(var i=0;i<clientList.length;i++){
+        var client=clientList[i];
+        if(client.url.indexOf('/Bus_KURU/')>=0&&'focus' in client){
+          return client.focus();
+        }
+      }
+      if(clients.openWindow)return clients.openWindow('/Bus_KURU/');
+    })
+  );
 });
 self.addEventListener('message',function(event){
   if(event.data&&event.data.type==='TEST_NOTIFICATION'){
