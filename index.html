@@ -1171,11 +1171,27 @@ try{["buskuru","buskuru2","buskuru3","buskuru4","bk5","bk6","bk7","bk8"].forEach
 S.favorites=lvFav();
 var cfg=lv();
 if(cfg&&cfg.route){
-  S.route=cfg.route;S.ti=cfg.ti||0;
+  S.route=cfg.route;
+  if(S.route.routeTripIds&&!(S.route.routeTripIds instanceof Set)){
+    S.route.routeTripIds=new Set(S.route.routeTripIds);
+  }
+  S.ti=cfg.ti||0;
   S.gurl=cfg.gurl||null;S.rid=cfg.rid||null;S.hasRT=cfg.hasRT||false;
   S.nm=cfg.nm||"stops";S.ns=cfg.ns||2;S.nm2=cfg.nm2||5;
   S.companyName=cfg.companyName||"";
-  S.scr="welcome";
+  S.targetBus=cfg.targetBus||null;
+  S.scr="monitor";
+  if(S.rid)srt();
+  // バスの経路の元データを裏側で読み直しておく（新しい便を選ぶ操作がすぐできるように）
+  if(S.gurl){
+    fetch(W+"/?action=fetch_stops&url="+encodeURIComponent(S.gurl))
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.error){
+        S.cachedFiles=d.files;S.stops=csv(d.files["stops.txt"]);
+        if(d.files["trips.txt"]&&d.files["stop_times.txt"])S.stopsWithDest=buildStopsWithDest(d.files);
+      }
+    }).catch(function(ex){});
+  }
 }
 render();
 
