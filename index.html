@@ -85,6 +85,7 @@ function sv(c){try{localStorage.setItem("bk9",JSON.stringify(c));}catch(x){}}
 function lv(){try{var s=localStorage.getItem("bk9");return s?JSON.parse(s):null;}catch(x){return null;}}
 function saveScreen(s){try{localStorage.setItem('bk_scr',s);}catch(x){}}
 function lvFav(){try{var s=localStorage.getItem("bk_fav");return s?JSON.parse(s):[];}catch(x){return[];}}
+function svFav(){try{localStorage.setItem("bk_fav",JSON.stringify(S.favorites));}catch(x){}}
 function saveState(){
   if(!S.route)return;
   var routeCopy=Object.assign({},S.route);
