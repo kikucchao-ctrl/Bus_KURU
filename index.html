@@ -239,7 +239,7 @@ function buildRoute(f,sid,serviceIds){
     stopTimes[t]={};
     stm.filter(function(r){return r.trip_id===t;}).forEach(function(r){stopTimes[t][r.stop_id]=r.arrival_time||r.departure_time;});
   });
-  return{name:rr.route_long_name||rr.route_short_name||"路線",stops:sl,schedules:sc,arrivalTimes:arrivalTimes,iv:3,tm:tm,stopIdx:stopIdx,routeTripIds:routeTripIds,stopTimes:stopTimes};
+  return{name:rr.route_long_name||rr.route_short_name||"路線",stops:sl,schedules:sc,arrivalTimes:arrivalTimes,tm:tm,stopIdx:stopIdx,routeTripIds:routeTripIds,stopTimes:stopTimes};
 }
 
 function buildTimetable(f,sid){
@@ -418,6 +418,16 @@ function updatePushSettings(){
   }).catch(function(ex){console.log('設定更新失敗:',ex);});
 }
 
+function scheduledArrivalAtBoardStop(tripId){
+  if(!S.route||!S.route.timetable)return null;
+  var dt=S.timetableDayType;
+  var entries=S.route.timetable[dt]||[];
+  for(var i=0;i<entries.length;i++){
+    if(entries[i].tripId===tripId)return pt(entries[i].timeStr);
+  }
+  return null;
+}
+
 function gb(){
   if(!S.route)return[];
   var iv=S.route.iv||3.5,now=S.now;
@@ -484,7 +494,7 @@ function gb(){
                 gMtt=pt(tgTime)+dl+actualDelay2-now;
               }
             }
-            if(gMtt===null){var stopsLeft=S.ti-pos;gMtt=stopsLeft*iv+dl;}
+            if(gMtt===null){var schedA=scheduledArrivalAtBoardStop(targetTripId);gMtt=(schedA!==null)?schedA+dl-now:mtt;}
             return[{id:"target-gps",times:[],pos:pos,mtt:gMtt,dl:dl,rt:true,lat:v.lat,lon:v.lon}];
           }
         }
@@ -527,8 +537,8 @@ function gb(){
             S.lastBestPos=pos2;
             if(pos2>S.ti+0.5){S.lockedTripId=null;S.lockedAt=0;S.lastBestPos=null;return[];}
             var mtt2=getMttFromStopTimes(bestTripId,Math.round(pos2));
-            if(mtt2===null){var stopsLeft2=S.ti-pos2;mtt2=stopsLeft2*iv+dl2;}
-            if(mtt2>-5){return[{id:"r-"+bestTripId,times:[],pos:pos2,mtt:mtt2,dl:dl2,rt:true,lat:v2.lat,lon:v2.lon}];}
+            if(mtt2===null){var schedB=scheduledArrivalAtBoardStop(bestTripId);if(schedB!==null)mtt2=schedB+dl2-now;}
+            if(mtt2!==null&&mtt2>-5){return[{id:"r-"+bestTripId,times:[],pos:pos2,mtt:mtt2,dl:dl2,rt:true,lat:v2.lat,lon:v2.lon}];}
           }
         }else if(S.route.tm&&S.route.tm[bestTripId]){
           var targetStop2=S.route.stops[S.ti];
@@ -538,13 +548,11 @@ function gb(){
             if(tTime)mtt3=pt(tTime)+dl2-now;
           }
           if(mtt3===null){
-            var dep=S.route.tm[bestTripId],dl3=dl2;
-            var times=ct(dep,S.route.stops.length,iv).map(function(t){return t+dl3;});
-            mtt3=times[S.ti]-now;
+            var schedC=scheduledArrivalAtBoardStop(bestTripId);
+            if(schedC!==null)mtt3=schedC+dl2-now;
           }
-          if(mtt3>-5){
-            var pos3b=gp(ct(S.route.tm[bestTripId],S.route.stops.length,iv),now);
-            return[{id:"r-"+bestTripId,times:[],pos:pos3b,mtt:mtt3,dl:dl2,rt:true}];
+          if(mtt3!==null&&mtt3>-5){
+            return[{id:"r-"+bestTripId,times:[],pos:-1,mtt:mtt3,dl:dl2,rt:true}];
           }
         }
       }
@@ -558,8 +566,17 @@ function gb(){
         if(pos3<0)return;
         if(pos3>S.ti+0.5)return;
         var dl4=(S.rd[v.tripId]||0)/60;
-        var stopsLeft3=S.ti-pos3;
-        var mtt4=stopsLeft3*iv+dl4;
+        var mtt4=null;
+        var targetStop4=S.route.stops[S.ti];
+        if(targetStop4&&S.route.stopTimes&&S.route.stopTimes[v.tripId]){
+          var tTime4=S.route.stopTimes[v.tripId][targetStop4.id];
+          if(tTime4)mtt4=pt(tTime4)+dl4-now;
+        }
+        if(mtt4===null){
+          var schedD=scheduledArrivalAtBoardStop(v.tripId);
+          if(schedD!==null)mtt4=schedD+dl4-now;
+        }
+        if(mtt4===null)return;
         if(mtt4<-5||mtt4>120)return;
         rb.push({id:"r-"+v.id,times:[],pos:pos3,mtt:mtt4,dl:dl4,rt:true,lat:v.lat,lon:v.lon});
       });
@@ -575,10 +592,17 @@ function gb(){
     if(mtt<-5||mtt>30)return;
     var tid=en.tripId;
     var stTimes=S.route.stopTimes&&S.route.stopTimes[tid];
-    var depTime=stTimes?stTimes[S.route.stops[0].id]:null;
-    var dep=depTime||en.timeStr;
-    var times=ct(dep,S.route.stops.length,iv);
-    result2.push({id:"t"+i,times:times,pos:gp(times,now),mtt:mtt,dm:pt(dep),dl:0,rt:false});
+    var times,dep;
+    if(stTimes){
+      times=S.route.stops.map(function(s){var t=stTimes[s.id];return t?pt(t):null;});
+      for(var k=1;k<times.length;k++){if(times[k]==null)times[k]=times[k-1];}
+      if(times[0]==null)times[0]=arrMin;
+      dep=times[0];
+    }else{
+      times=ct(en.timeStr,S.route.stops.length,iv);
+      dep=pt(en.timeStr);
+    }
+    result2.push({id:"t"+i,times:times,pos:gp(times,now),mtt:mtt,dm:dep,dl:0,rt:false});
   });
   return result2;
 }
@@ -733,7 +757,7 @@ function selectStop(sid){
     S.cachedFiles=d.files;
     var ns2=res.stops.map(function(x){return{id:x.id,name:x.name,lat:x.lat,lon:x.lon};});
     var ni=0;for(var i=0;i<res.stops.length;i++){if(res.stops[i].id===sid){ni=i;break;}}
-    var nr={name:res.name,stops:ns2,defaultStops:ns2.slice(),schedules:res.schedules,arrivalTimes:res.arrivalTimes,iv:3,tm:res.tm,stopId:sid,timetable:timetable,routeTripIds:res.routeTripIds,stopTimes:res.stopTimes};
+    var nr={name:res.name,stops:ns2,defaultStops:ns2.slice(),schedules:res.schedules,arrivalTimes:res.arrivalTimes,tm:res.tm,stopId:sid,timetable:timetable,routeTripIds:res.routeTripIds,stopTimes:res.stopTimes};
     S.route=nr;S.ti=ni;S.nids=[];S.targetBus=null;S.scr="monitor";
     S.lastTargetPos=null;S.lastBestPos=null;S.lockedTripId=null;S.lockedAt=0;
     saveState();saveScreen('monitor');
