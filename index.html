@@ -970,6 +970,10 @@ function render(){
   var nai=S.nm==="stops"?Math.max(0,S.ti-S.ns):null;
   var nextInfo=getNextBusInfo();
   var isGPS=!!(nx&&nx.rt);
+  var isLightCardBg=(S.theme==="day"||S.theme==="dusk");
+  var ctMain=isLightCardBg?"#1a2e4a":"#ffffff";
+  var ctSub=isLightCardBg?"rgba(26,46,74,0.75)":"rgba(255,255,255,0.85)";
+  var ctShadow=isLightCardBg?"none":"0 1px 3px rgba(0,0,0,0.4)";
 
   if(S.scr==="loading"){
     app.innerHTML='<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">'
@@ -1174,22 +1178,22 @@ function render(){
     var isInService=firstTime!==null&&lastTime!==null&&S.now>=firstTime&&S.now<=lastTime+30;
     var nextStr="";
     if(nextInfo){
-      nextStr='<div style="font-size:13px;color:#ffffff;margin-top:8px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,0.4)">'
+      nextStr='<div style="font-size:13px;color:'+ctMain+';margin-top:8px;font-weight:700;text-shadow:'+ctShadow+'">'
       +'次の便: '+ft(nextInfo.time)+'着予定'
-      +'<div style="font-size:11px;color:rgba(255,255,255,0.85);font-weight:400;margin-top:2px">約'+(nextInfo.mtt<60?Math.ceil(nextInfo.mtt)+'分後':Math.floor(nextInfo.mtt/60)+'時間'+Math.round(nextInfo.mtt%60)+'分後')+'</div>'
+      +'<div style="font-size:11px;color:'+ctSub+';font-weight:400;margin-top:2px">約'+(nextInfo.mtt<60?Math.ceil(nextInfo.mtt)+'分後':Math.floor(nextInfo.mtt/60)+'時間'+Math.round(nextInfo.mtt%60)+'分後')+'</div>'
       +'</div>';
     }
     if(isInService){
       html+='<div style="background:'+T.card+';border-radius:20px;padding:22px;border:1px solid '+T.border+';margin-bottom:0;text-align:center">'
-      +(nextInfo?nextStr:'<div style="font-size:14px;color:#ffffff;text-shadow:0 1px 3px rgba(0,0,0,0.4)">次の便を確認中…</div>')
-      +(S.route.timetable?'<div style="font-size:11px;color:rgba(255,255,255,0.85);margin-top:8px">「📋 時刻表」で詳細を確認できます</div>':"")
+      +(nextInfo?nextStr:'<div style="font-size:14px;color:'+ctMain+';text-shadow:'+ctShadow+'">次の便を確認中…</div>')
+      +(S.route.timetable?'<div style="font-size:11px;color:'+ctSub+';margin-top:8px">「📋 時刻表」で詳細を確認できます</div>':"")
       +'</div>';
     }else{
       html+='<div style="background:'+T.card+';border-radius:20px;padding:22px;border:1px solid '+T.border+';margin-bottom:0;text-align:center">'
       +'<div style="font-size:28px;margin-bottom:8px">'+T.icon+'</div>'
-      +'<div style="font-size:14px;color:#ffffff;text-shadow:0 1px 3px rgba(0,0,0,0.4)">現在、運行時間外です</div>'
+      +'<div style="font-size:14px;color:'+ctMain+';text-shadow:'+ctShadow+'">現在、運行時間外です</div>'
       +nextStr
-      +(S.route.timetable?'<div style="font-size:11px;color:rgba(255,255,255,0.85);margin-top:8px">「📋 時刻表」で詳細を確認できます</div>':"")
+      +(S.route.timetable?'<div style="font-size:11px;color:'+ctSub+';margin-top:8px">「📋 時刻表」で詳細を確認できます</div>':"")
       +'</div>';
     }
   }
