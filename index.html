@@ -616,14 +616,7 @@ function gb(){
             if(tgStop&&S.route.stopTimes&&S.route.stopTimes[targetTripId]){
               var tgTime=S.route.stopTimes[targetTripId][tgStop.id];
               if(tgTime){
-                var curStop=S.route.stops[Math.round(pos)];
-                var actualDelay2=0;
-                if(curStop&&S.route.stopTimes[targetTripId][curStop.id]){
-                  var schNow=pt(S.route.stopTimes[targetTripId][curStop.id]);
-                  var ad=now-schNow;
-                  if(ad>-5&&ad<30)actualDelay2=ad;
-                }
-                gMtt=pt(tgTime)+dl+actualDelay2-now;
+                gMtt=pt(tgTime)+dl-now;
               }
             }
             if(gMtt===null){var schedA=scheduledArrivalAtBoardStop(targetTripId);gMtt=(schedA!==null)?schedA+dl-now:mtt;}
@@ -650,17 +643,7 @@ function gb(){
           if(!targetStop)return null;
           var targetTime=st[targetStop.id];
           if(!targetTime)return null;
-          var targetMin=pt(targetTime)+dl2;
-          var currentStop=S.route.stops[currentStopIdx];
-          if(currentStop){
-            var currentTime=st[currentStop.id];
-            if(currentTime){
-              var scheduledNow=pt(currentTime);
-              var actualDelay=now-scheduledNow;
-              if(actualDelay>-5&&actualDelay<30){return targetMin+actualDelay-now;}
-            }
-          }
-          return targetMin-now;
+          return pt(targetTime)+dl2-now;
         }
         if(stopsHaveCoords&&v2.lat&&v2.lon){
           var pos2=gpsToRoutePos(v2.lat,v2.lon,S.route.stops);
