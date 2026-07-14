@@ -1117,7 +1117,7 @@ function render(){
   var ri="";
   if(S.rid){var sa=S.lu?Math.round((Date.now()-S.lu)/1000):null;ri=S.re?'<span style="color:#ef4444;font-size:10px">● RTエラー</span>':sa!==null?'<span style="color:#22c55e;font-size:10px;animation:pulse 2s infinite">● '+(sa<60?sa+"秒前":Math.round(sa/60)+"分前")+'</span>':'<span style="color:'+T.sub+';font-size:10px">● 取得中</span>';}
 
-  // ── ヘッダー（固定表示エリア：会社名・時刻・ボタン・通知設定ボタン・カウントダウンをまとめて画面上部に固定）──
+  // ── ヘッダー（固定表示エリア：会社名・時刻・ボタン・通知設定ボタンをまとめて画面上部に固定。次のバス案内カードは固定表示エリアから外している）──
   html+='<div id="sticky-header" style="background:'+T.hdr+';padding:14px 14px 0;margin:-14px -14px 0;position:sticky;top:0;z-index:100">'
   +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
   +'<span style="font-size:22px;animation:float 2.5s ease-in-out infinite">🚌</span>'
@@ -1153,6 +1153,9 @@ function render(){
   +'</div>';
 
   html+=renderDiaBadge(T);
+  html+='</div>'
+  +'</div>';
+  html+='<div style="height:14px"></div>';
   if(nx){
     var dl=nx.dl>0.5?'<div style="font-size:11px;color:#f97316;margin-top:3px">⚠️ '+Math.round(nx.dl)+'分遅れ</div>':nx.dl<-0.5?'<div style="font-size:11px;color:#22c55e;margin-top:3px">✓ '+Math.round(-nx.dl)+'分早め</div>':"";
     var gpsLabel=isGPS
@@ -1221,9 +1224,7 @@ function render(){
       +'</div>';
     }
   }
-  html+='</div>'
-  +'</div>'
-  +'<div style="height:14px"></div>';
+  html+='<div style="height:14px"></div>';
 
   if(S.ss){
     html+='<div style="margin-bottom:14px">';
