@@ -1061,6 +1061,24 @@ function fitNavButtons(){
     }
   });
 }
+function fitSearchInput(){
+  var inp=document.getElementById('sq');
+  if(!inp)return;
+  var text=inp.getAttribute('placeholder')||'';
+  var maxWidth=inp.clientWidth-24;
+  if(maxWidth<=0)return;
+  if(!fitSearchInput._canvas)fitSearchInput._canvas=document.createElement('canvas');
+  var ctx=fitSearchInput._canvas.getContext('2d');
+  var size=15;
+  function measure(s){
+    ctx.font=s+"px 'Hiragino Sans','Noto Sans JP',sans-serif";
+    return ctx.measureText(text).width;
+  }
+  while(measure(size)>maxWidth&&size>11){
+    size--;
+  }
+  inp.style.fontSize=size+'px';
+}
 function render(){
   var T=TH[S.theme];
   document.body.style.background=T.bg;
@@ -1149,12 +1167,12 @@ function render(){
       });
       h2+='</div>';
     }
-    h2+='<div style="text-align:center"><button onclick="S.scr=\'manual\';render()" style="background:none;border:none;color:'+T.sub+';font-size:13px;cursor:pointer;text-decoration:underline">手動で入力する</button></div>'
-    +'</div></div>';
+    h2+='</div></div>';
     if(S.setupModal)h2+=renderSetupModal(T);
     app.innerHTML=h2;
     var sq2=document.getElementById("sq");
     if(sq2)sq2.onkeydown=function(ev){if(ev.key==="Enter"){S.sq=sq2.value;hs2();}};
+    fitSearchInput();
     return;
   }
 
